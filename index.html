@@ -113,7 +113,8 @@ details summary{cursor:pointer;font-weight:700}
   var LEVELS = { weak: 0.70, solid: 0.90, strong: 1.05, outstanding: 1.15 };
   var LEVEL_NAMES = { weak: 'Weak', solid: 'Solid', strong: 'Strong', outstanding: 'Outstanding' };
   var EV_Q = { weak: 0.30, solid: 0.60, strong: 0.85, outstanding: 1.0 };
-  var CAP = 130, MAX_RIGHTS = 30, RIGHT_MULT = 2.5;
+  var CAP = 200, MAX_RIGHTS = 30, RIGHT_MULT = 2.5;
+  var REF = 130, RESEARCH_F = { weak: 0.85, solid: 0.93, strong: 0.98, outstanding: 1 }, PITCH_F = { weak: 0.88, solid: 0.95, strong: 0.99, outstanding: 1 };
   var W_BASE = 65, W_LAUNCH = 45, W_EVENTS = 12, W_SALES = 8;
   var STATES = ['NSW', 'VIC', 'QLD', 'WA'];
   var GROUPS = ['Large commercial farms', 'Mid-size commercial breeders', 'Farm clients and shareholders',
@@ -227,6 +228,7 @@ details summary{cursor:pointer;font-weight:700}
     STATES.forEach(function (s) { l1 += Math.abs(((geo && geo[s]) || 0) / (tot || 1) - b[s]); });
     return 1 - 0.5 * (l1 / 2);
   }
+  function benchBook(c) { return (c && c.A && c.A.book) || REF; }
   function salesCurve(x) { return 1 - Math.exp(-Math.max(0, x) / 9000); }
   function rightsCostCurve(nStar, n) {
     var c = 0; for (var i = 1; i <= n; i++) c += Math.max(0, 1.5 + 0.10 * (i - nStar));
@@ -249,6 +251,8 @@ details summary{cursor:pointer;font-weight:700}
     var O = LEVELS[(levels && levels.oct) || (levels && levels.launch) || 'solid'];
     var msgF = (0.7 * L + 0.3 * O) / LEVELS.outstanding, msgLaunch = L / LEVELS.outstanding;
     var tf = targetFit(colt, dec.targets), gf = geoFit(colt, pl, dec.geo);
+    var BK = benchBook(colt), K = BK / REF;
+    var prep = RESEARCH_F[(levels && levels.research) || 'solid'] * PITCH_F[(levels && levels.pitch) || 'solid'];
     var mk = 0.8 + 0.2 * pl.P;
 
     var launchBuys = dec.buys || {};
@@ -269,11 +273,11 @@ details summary{cursor:pointer;font-weight:700}
     var left = Math.max(0, D.budget - spent);
     var benchLeft = D.budget - cost(colt.buys);
 
-    var base = W_BASE * pl.P;
-    var launch = W_LAUNCH * msgLaunch * tf * gf * mixL * mk;
-    var late = W_LAUNCH * msgF * tf * gf * (mixAll - mixL) * mk + W_LAUNCH * (msgF - msgLaunch) * tf * gf * mixL * mk * 0.5;
-    var evPart = function (i) { return (W_EVENTS / 3) * qs[i] * mk; };
-    var sales = W_SALES * Math.min(1, salesCurve(left) / salesCurve(benchLeft)) * mk;
+    var base = K * W_BASE * pl.P * prep;
+    var launch = K * W_LAUNCH * msgLaunch * tf * gf * mixL * mk * prep;
+    var late = K * W_LAUNCH * msgF * tf * gf * (mixAll - mixL) * mk + K * W_LAUNCH * (msgF - msgLaunch) * tf * gf * mixL * mk * 0.5;
+    var evPart = function (i) { return K * (W_EVENTS / 3) * qs[i] * mk; };
+    var sales = K * W_SALES * Math.min(1, salesCurve(left) / salesCurve(benchLeft)) * mk;
 
     var d1 = feeDemand(fee1, pl);
     var sepBook = Math.min(CAP, 0.60 * (base + launch) * d1);
@@ -286,7 +290,7 @@ details summary{cursor:pointer;font-weight:700}
     var remaining = Math.max(0, rawAll - rawOct) * (changed ? d2 : d1);
     if (changed && cut) remaining *= 0.92;
     if (changed && !cut) remaining = Math.max(0, remaining - 2);
-    var noise = opts.noise === 0 ? 0 : (rng(seed + ':luck')() - 0.5) * 0.04;
+    var noise = opts.noise === 0 ? 0 : -rng(seed + ':luck')() * 0.03;
     var finalBook = clamp((octBook + remaining) * (1 + noise), octBook, CAP);
 
     var stage = opts.stage || 'final';
@@ -294,7 +298,7 @@ details summary{cursor:pointer;font-weight:700}
     var bookings = Math.round(book);
 
     /* money: first year */
-    var rightsCap = Math.round(MAX_RIGHTS * Math.pow(Math.min(1, finalBook / CAP), 2));
+    var rightsCap = Math.round(MAX_RIGHTS * Math.pow(Math.min(1, finalBook / BK), 2));
     var rightsSold = Math.max(0, Math.min(Math.round(Number(dec.rights) || 0), MAX_RIGHTS, rightsCap, bookings));
     var feeAll = cut ? fee2 : fee1;
     var octN = Math.round(octBook);
@@ -327,7 +331,7 @@ details summary{cursor:pointer;font-weight:700}
       share1: profit1 / bench.profit1, share3: profit3 / bench.profit3, profit3: Math.round(profit3),
       y2: y2, y3: y3, spent: spent, left: left, reached: reached, enquiries: enquiries,
       factors: { placement: pl.P, placementKind: pl.kind, fee: d1, feeStar: pl.fstar, feeLo: pl.lo, feeHi: pl.hi, message: msgF, targets: tf, geo: gf,
-        mix: mixAll, mixLaunch: mixL, events: stage === 'oct' ? qs[0] : (qs[0] + qs[1] + qs[2]) / 3, sales: Math.min(1, salesCurve(left) / salesCurve(benchLeft)), crowd: pl.crowd || 0 },
+        mix: mixAll, mixLaunch: mixL, events: stage === 'oct' ? qs[0] : (qs[0] + qs[1] + qs[2]) / 3, sales: Math.min(1, salesCurve(left) / salesCurve(benchLeft)), crowd: pl.crowd || 0, prep: prep },
       parts: { base: base * d1, launch: launch * d1, season: (late + evPart(0) + evPart(1) + evPart(2) + sales) * d1 },
       events: evs
     };
@@ -336,15 +340,15 @@ details summary{cursor:pointer;font-weight:700}
   var benchCache = {};
   function benchmark(coltId) {
     if (benchCache[coltId]) return benchCache[coltId];
-    var c = byColt[coltId], F = c.A.fee;
-    var profit1 = (CAP + MAX_RIGHTS * (RIGHT_MULT - 1)) * F - D.budget;
+    var c = byColt[coltId], F = c.A.fee, BK = benchBook(c);
+    var profit1 = (BK + MAX_RIGHTS * (RIGHT_MULT - 1)) * F - D.budget;
     var best = -1e18, bestN = 0;
     for (var n = 0; n <= MAX_RIGHTS; n++) {
       var C = rightsCostCurve(c.A.rights, n);
-      var p = (CAP + n * (RIGHT_MULT - 1)) * F - D.budget + F * (Math.max(0, 0.85 * CAP - 0.6 * C) + Math.max(0, 0.72 * CAP - 0.4 * C));
+      var p = (BK + n * (RIGHT_MULT - 1)) * F - D.budget + F * (Math.max(0, 0.85 * BK - 0.6 * C) + Math.max(0, 0.72 * BK - 0.4 * C));
       if (p >= best - 1e-6) { best = p; bestN = n; }
     }
-    return (benchCache[coltId] = { profit1: profit1, profit3: best, rights3: bestN, bookings: CAP, fee: F });
+    return (benchCache[coltId] = { profit1: profit1, profit3: best, rights3: bestN, bookings: BK, fee: F });
   }
   /* the benchmark campaign as a decision set, for the final report */
   function benchDecisions(coltId) {
@@ -364,6 +368,7 @@ details summary{cursor:pointer;font-weight:700}
       res.fee1 < f.feeLo ? 'The fee is below the level where a lower price wins any more mares, so revenue is being given away.' :
       'The fee is below what the market would pay, so each booking earns less than it could.';
     add(res.fee1 > f.feeStar * 1.03 ? f.fee : (res.fee1 < f.feeStar * 0.97 ? 0.8 : 1), 'The fee sits where breeders see value and the owner still earns.', feeTxt);
+    add((f.prep - 0.75) / 0.25, 'Your research and launch case gave the owner and the farm real confidence in him.', 'Thin research or a weak launch case cost him bookings before the season even started.');
     add(f.message, 'The messaging is landing with breeders.', 'The messaging is not giving breeders a strong reason to choose him.');
     add((f.targets - 0.55) / 0.45, 'You are talking to the breeders most likely to use him.', 'Much of the effort is aimed at breeders who are unlikely to use this horse.');
     add((f.geo - 0.5) / 0.5, 'The marketing is concentrated in the right states.', 'Too much of the marketing is going to states where his mares are not.');
@@ -413,13 +418,15 @@ details summary{cursor:pointer;font-weight:700}
       if (r() < 0.25) o.cost = [2000, 4000, 5000, 6000][Math.floor(r() * 4)];
       return o; }
     var lv = r(), level = lv < 0.15 * (1.5 - s) ? 'weak' : lv < 0.6 - 0.25 * s ? 'solid' : lv < 0.95 - 0.2 * s ? 'strong' : 'outstanding';
-    return { decisions: { farm: farm, fee: fee, rights: pick([0, 10, 20, 30, 30]), targets: targets, geo: geo, buys: buys,
+    function lvl() { var x = r(); return x < 0.15 * (1.5 - s) ? 'weak' : x < 0.6 - 0.25 * s ? 'solid' : x < 0.95 - 0.2 * s ? 'strong' : 'outstanding'; }
+    var research = lvl(), pitch = lvl();
+    return { research: research, pitch: pitch, decisions: { farm: farm, fee: fee, rights: pick([0, 10, 20, 30, 30]), targets: targets, geo: geo, buys: buys,
       r1: resp(), r2: resp(), r3: resp() }, level: level };
   }
 
   var API = { init: init, evaluate: evaluate, benchmark: benchmark, benchDecisions: benchDecisions, placement: placement, drivers: drivers,
     assign: assign, botDecisions: botDecisions, eventFor: eventFor, cost: cost, feeDemand: feeDemand,
-    EVENTS: EVENTS, LEVELS: LEVELS, LEVEL_NAMES: LEVEL_NAMES, GROUPS: GROUPS, STATES: STATES, CAP: CAP, MAX_RIGHTS: MAX_RIGHTS, RIGHT_MULT: RIGHT_MULT };
+    EVENTS: EVENTS, LEVELS: LEVELS, LEVEL_NAMES: LEVEL_NAMES, GROUPS: GROUPS, STATES: STATES, CAP: CAP, benchBook: benchBook, MAX_RIGHTS: MAX_RIGHTS, RIGHT_MULT: RIGHT_MULT };
   return API;
 });
 </script>
@@ -429,15 +436,29 @@ const E=StallionEngine; E.init(DATA);
 const STAGES=[{k:'lobby',m:'Draw',t:'The draw'},{k:'jan',m:'January',t:'Research and development'},{k:'apr',m:'April',t:'Launch'},{k:'jun',m:'June and July',t:'Positioning'},{k:'sep',m:'September',t:'Season opens'},{k:'oct',m:'October',t:'Reassess'},{k:'nov',m:'November',t:'Final campaign'},{k:'dec',m:'December',t:'Results'}];
 const NEW_SIRES=[['Tentyris',88000,'Darley Kelvinside'],['Observer',33000,'Darley Northwood Park'],['Devil Night',33000,'Yulong Segenhoe'],['Private Harry',27500,'Yulong Segenhoe'],['Tropicus',27500,'Vinery'],['Vinrock',22000,'Yulong'],['Wodeton',16500,'Newgate Farm'],['Cool Archie',16500,'Newhaven Park'],['Espionage',11000,'Lovatsville'],['Libertad',9900,'Blue Gum Farm'],['Coleman',7700,'Blue Gum Farm'],['Straight Charge',6600,'Westbury Park']];
 const RESOURCES=[['Australian Stud Book','Mares covered by each stallion, pedigrees and mare records'],['Breednet','Stallion directory, service fees, sire tables and news'],['The Straight','2026 service fee list and market analysis'],['TTR AusNZ','Daily features and yearling-sale return analysis'],['ANZ Bloodstock News','Roster and fee announcements'],['Arion Pedigrees','Pedigrees, race records and stallion statistics'],['Stud farm websites','Stallion pages, fees and nominations contacts'],['Inglis and Magic Millions','Yearling sale results by sire'],['State breeders associations','State stallion lists and local covering figures'],['Racing NSW, Racing Victoria, Racing Queensland, RWWA','BOBS, VOBIS, QTIS and Westspeed rules'],['Race replays and form','What your colt did on the track']];
+const MARKET={
+ mares:[['NSW',8267,9513,-13,54],['VIC',4105,5819,-29,27],['QLD',1679,2721,-38,11],['WA',1081,1413,-23,7],['TAS and SA',278,627,-56,2],['Australia',15410,20093,-23,100]],
+ fees:[['NSW',5027,'99.2%',52656,27500,'$264.70m'],['VIC',2718,'97.3%',36348,22000,'$98.79m'],['QLD',1705,'98.7%',27038,16500,'$46.10m'],['WA',960,'94.7%',20682,8800,'$19.85m'],['SA',292,'96.7%',31908,22000,'$9.32m'],['TAS',168,'100%',22206,8800,'$3.73m'],['ACT',32,'100%',24802,16500,'$0.79m'],['NT',6,'100%',12283,9350,'$0.07m'],['NZ',86,'97.7%',64900,49500,'$5.58m'],['Not recorded',79,'98.8%',53350,38500,'$4.21m']],
+ bands:[['NSW',337,1878,1360,1012,440,43],['VIC',346,1148,616,528,80,74],['QLD',490,596,435,148,36,23],['WA',622,82,195,53,8,54],['SA',39,113,88,48,4,10],['TAS',114,25,12,12,5,0]],
+ books:[['Storm Boy',2025,'Coolmore, NSW',16500,227],['Shinzo',2024,'Coolmore, NSW',55000,218],['Home Affairs',2022,'Coolmore, NSW',110000,202],['Switzerland',2025,'Coolmore, NSW',60500,194],['Ozzmosis',2024,'Newgate, NSW',44000,192],['Acrobat',2022,'Coolmore, NSW',13750,188],['Growing Empire',2025,'Yulong, VIC',22000,182],["King's Gambit",2024,'Newgate, NSW',22000,175],['In The Congo',2023,'Newgate, NSW',33000,169],['Broadsiding',2025,'Darley, NSW',66000,160],['City Of Troy',2025,'Coolmore, NSW',49500,158],['Vandeek',2025,'Arrowfield, NSW',22000,151],['Splintex',2022,'Darling View, WA',11000,118]]};
+const n0=x=>Number(x).toLocaleString('en-AU');
+function tbl(head,rows,right){return `<div class="scroll"><table><thead><tr>${head.map((h,i)=>`<th${i>=right?' class="r"':''}>${h}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr${r[0]==='Australia'?' style="font-weight:700"':''}>${r.map((v,i)=>`<td${i>=right?' class="r"':''}>${v}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`}
+function marketPanel(open){return `<div class="band tight"><details class="card"${open?' open':''}><summary>Market data</summary><div class="stack" style="margin-top:14px">
+  <div><h3>Mares served by state</h3>${tbl(['State','Mares served 2025','Mares served 2021','Change','Share of 2025 total'],MARKET.mares.map(r=>[r[0],n0(r[1]),n0(r[2]),r[3]+'%',r[4]+'%']),1)}</div>
+  <div><h3>Service fees by state</h3>${tbl(['State or country','Services priced','Coverage','Average fee','Median fee','Indicative fee value'],MARKET.fees.map(r=>[r[0],n0(r[1]),r[2],money(r[3]),money(r[4]),r[5]]),1)}</div>
+  <div><h3>Services by fee band</h3>${tbl(['State','Under $10k','$10k to $24,999','$25k to $49,999','$50k to $99,999','$100k+','Unpriced'],MARKET.bands.map(r=>[r[0]].concat(r.slice(1).map(n0))),1)}</div>
+  <div><h3>What a first-season book really looks like</h3><p class="small" style="margin:4px 0 8px">The most mares a stallion can cover in a season here is ${E.CAP}. First books averaged 106 across all new sires in 2024 and about 115 from 2021 to 2024. These are the best-supported launches of 2022 to 2025: the fee explains almost nothing about book size; the horse's profile and the farm behind him do.</p>${tbl(['Stallion','First season','Farm','Fee','Mares covered'],MARKET.books.map(r=>[r[0],r[1],r[2],money(r[3]),r[4]]),3)}<p class="small muted" style="margin-top:6px">Australian Stud Book covering figures as reported by Breednet, The Straight, Newgate and TBWA.</p></div>
+ </div></details></div>`}
 const BRIEF=[
   ['racehorse','1. The racehorse','His best wins and placings, ratings, best distance, when he peaked and what type of horse he is: sprinter, miler, two-year-old, staying type.','Feeds your selling points in June'],
   ['pedigree','2. The pedigree','How his sire is going at stud, how the sire\'s other sons have done as stallions, and how strong his dam\'s family is. Include the risks as well as the strengths.','Feeds your selling points in June'],
   ['comps','3. The comparables','Three stallions most like him that retired in the last few years. For each: where he stood, his opening fee, and how many mares he covered in his first book.','Feeds your fee and named competitors in April'],
   ['buyers','4. The buyers','Which breeders will use him, with what kind of mares, and in which states. Who will not, and why.','Feeds your breeder groups and state split in June'],
   ['farms','5. Farm shortlist','Two or three farms that could stand him, and what each one offers him: clients, roster, location, record with new stallions.','Feeds your farm choice in April'],
-  ['advice','6. Early advice to the owner','A fee range you would start from, and whether to sell straight nominations or breeding rights. Give your reasons.','Feeds your fee and selling model in April']];
+  ['advice','6. Early advice to the owner','A fee range you would start from, and whether to sell straight nominations or breeding rights. Give your reasons.','Feeds your fee and selling model in April'],
+  ['worth','7. What he is worth','What is he worth to the owner as a stallion over his first three seasons, before his first runners? Show how you got there: fee, book size, breeding rights.','Revealed against his real value in December']];
 function briefPanel(p,open){const j=p.jan||{},b=j.brief||{};if(!p.submitted||!p.submitted.jan)return'';
-  return `<div class="band tight"><details class="card"${open?' open':''}><summary>Your brief to the owner</summary><div class="stack" style="margin-top:12px;max-width:900px">${BRIEF.map(x=>`<div><div class="eyebrow">${x[1]}</div><p style="white-space:pre-wrap;margin-top:4px">${esc(b[x[0]]||'')||'<span class="muted">Not written.</span>'}</p></div>`).join('')}${j.sources?`<div><div class="eyebrow">Sources</div><p class="small" style="white-space:pre-wrap;margin-top:4px">${esc(j.sources)}</p></div>`:''}</div></details></div>`}
+  return `<div class="band tight"><details class="card"${open?' open':''}><summary>Your brief to the owner</summary><div class="stack" style="margin-top:12px;max-width:900px">${BRIEF.map(x=>`<div><div class="eyebrow">${x[1]}</div><p style="white-space:pre-wrap;margin-top:4px">${esc(b[x[0]]||'')||'<span class="muted">Not written.</span>'}</p></div>`).join('')}${Number(j.value)?`<div><div class="eyebrow">Your valuation</div><p style="margin-top:4px"><b>${money(j.value)}</b></p></div>`:''}${j.sources?`<div><div class="eyebrow">Sources</div><p class="small" style="white-space:pre-wrap;margin-top:4px">${esc(j.sources)}</p></div>`:''}</div></details></div>`}
 const $=(s,r=document)=>r.querySelector(s);
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const money=n=>'$'+Math.round(n||0).toLocaleString('en-AU');
@@ -450,7 +471,7 @@ let S=null, ui={role:'host',tab:'room'}, draft={};
 const LIVE={db:null,user:null,owner:false,full:false,err:'',token:null,seat:null,uid:null,booted:false,saveErr:''};
 let GS=null, SUBS={}, SEATS={}, JUDGE={levels:{},password:''}, RES=null, SUB=null;
 const GS_KEYS=['seed','stage','open','pwHash','timerEnd','reveal','hideNames','sim','assign'];
-const SLOT_STAGE={launch:'jun',ev_sep:'sep',ev_oct:'oct',ev_nov:'nov',oct:'oct'};
+const SLOT_STAGE={research:'jan',pitch:'apr',launch:'jun',ev_sep:'sep',ev_oct:'oct',ev_nov:'nov',oct:'oct'};
 function newGame(){return {seed:'g'+Math.floor(Math.random()*1e9),stage:0,open:true,pwHash:'',timerEnd:0,reveal:0,hideNames:false,sim:true,assign:{}}}
 function lsGet(k){try{return localStorage.getItem(k)}catch(e){return null}}
 function lsSet(k,v){try{localStorage.setItem(k,v)}catch(e){}}
@@ -496,12 +517,12 @@ function fillBot(p){
   const facts=c.facts.slice().sort(()=>r()-.5).slice(0,3);
   const geo={};E.STATES.forEach(s=>geo[s]=Math.round((d.geo[s]||0)*100));
   const fix=100-E.STATES.reduce((a,s)=>a+geo[s],0);geo[farm(d.farm).state]+=fix;
-  p.jan={sources:'Australian Stud Book, Breednet, stud websites',brief:{racehorse:c.facts.slice(0,2).join('. ')+'.',pedigree:'By '+c.sire+'.',comps:comps.join(', ')+'.',buyers:d.targets.join(', ')+'.',farms:d.farm+'.',advice:'Start at '+money(d.fee)+'.'}};
+  p.jan={sources:'Australian Stud Book, Breednet, stud websites',brief:{racehorse:c.facts.slice(0,2).join('. ')+'.',pedigree:'By '+c.sire+'.',comps:comps.join(', ')+'.',buyers:d.targets.join(', ')+'.',farms:d.farm+'.',advice:'Start at '+money(d.fee)+'.',worth:'Based on fee and book.'},value:Math.round(E.benchmark(c.id).profit3*(0.5+r()*1.1)/50000)*50000};
   p.apr={farm:d.farm,why:'Simulated student.',competitors:comps,fee:d.fee,feeWhy:'Simulated student.',model:d.rights>0?'rights':'noms',rights:d.rights};
   p.jun={sp:facts,why:'Simulated student: '+facts[0]+'.',targets:d.targets,geo:geo,buys:d.buys};
   const evx=r=>({text:r.text,cost:r.cost||'',disc:r.disc||'',mares:r.mares||'',buys:{}});
   p.sep=evx(d.r1);p.oct=Object.assign(evx(d.r2),{fee:null,diagnosis:'Simulated student.'});p.nov=evx(d.r3);
-  S.levels[p.id]=Object.assign({launch:b.level,oct:null,note:'',ev_sep:d.r1.level,ev_oct:d.r2.level,ev_nov:d.r3.level},S.levels[p.id]||{});
+  S.levels[p.id]=Object.assign({research:b.research,pitch:b.pitch,launch:b.level,oct:null,note:'',ev_sep:d.r1.level,ev_oct:d.r2.level,ev_nov:d.r3.level},S.levels[p.id]||{});
 }
 function mulberry(seed){let s=0;for(const ch of String(seed))s=(Math.imul(s^ch.charCodeAt(0),2654435761)+0x9e3779b9)|0;return()=>{s|=0;s=(s+0x6D2B79F5)|0;let t=Math.imul(s^(s>>>15),1|s);t=(t+Math.imul(t^(t>>>7),61|t))^t;return((t^(t>>>14))>>>0)/4294967296}}
 function decisionsOf(p){
@@ -512,7 +533,7 @@ function decisionsOf(p){
 function evDec(p,k){const x=p[k]||{},l=S.levels[p.id]||{};
   return {text:x.text||'',cost:Number(x.cost)||0,disc:Number(x.disc)||0,mares:Number(x.mares)||0,level:l['ev_'+k]||null,buys:x.buys||{}};
 }
-function levelsOf(p){const l=S.levels[p.id]||{};return{launch:l.launch||'solid',oct:l.oct||l.launch||'solid'}}
+function levelsOf(p){const l=S.levels[p.id]||{};return{launch:l.launch||'solid',oct:l.oct||l.launch||'solid',research:l.research||'solid',pitch:l.pitch||'solid'}}
 function resultOf(p,stage){
   if(!S.assign[p.id]||!(p.apr&&p.apr.farm))return null;
   const st=stage||(S.stage>=7?'final':S.stage>=5?'oct':'sep');
@@ -533,7 +554,7 @@ function getDraft(p,k){
   const id=p.id+':'+k;
   if(!draft[id]){
     const base=p[k]&&p.submitted[k]?JSON.parse(JSON.stringify(p[k])):null;
-    draft[id]=base||({jan:{sources:'',brief:{racehorse:'',pedigree:'',comps:'',buyers:'',farms:'',advice:''}},apr:{farm:'',why:'',competitors:['','',''],fee:'',feeWhy:'',model:'noms',rights:0,state:''},
+    draft[id]=base||({jan:{sources:'',value:'',brief:{racehorse:'',pedigree:'',comps:'',buyers:'',farms:'',advice:'',worth:''}},apr:{farm:'',why:'',competitors:['','',''],fee:'',feeWhy:'',model:'noms',rights:0,state:''},
       jun:{sp:['','',''],why:'',targets:['','',''],geo:{NSW:25,VIC:25,QLD:25,WA:25},buys:{}},sep:{text:'',cost:'',disc:'',mares:'',buys:{}},oct:{text:'',cost:'',disc:'',mares:'',buys:{},fee:null,diagnosis:'',rewrite:false,sp:null,why:null},nov:{text:'',cost:'',disc:'',mares:'',buys:{}}})[k];
     if(k==='apr'&&draft[id].farm&&!draft[id].state)draft[id].state=farm(draft[id].farm).state;
   }
@@ -559,7 +580,7 @@ function coltCol(id){const i=DATA.colts.findIndex(c=>c.id===id);return COLT_COL[
 function horse(){return `<div class="gate">${DATA.colts.map((c,i)=>`<div style="background:var(--${COLT_COL[i%6]})"><b>Gate ${i+1}</b><span>${esc(c.name)}</span></div>`).join('')}</div>`}
 function geoTag(tot){return tot===100?'<span class="tag ok">Totals 100%</span>':`<span class="tag wait">Totals ${tot}%; it must be 100%</span>`}
 function validate(p,k,d){
-  if(k==='jan'){const miss=BRIEF.filter(x=>!String((d.brief||{})[x[0]]||'').trim());if(miss.length)return'Write something in every section. Still empty: '+miss.map(x=>x[1].replace(/^\d+\. /,'')).join(', ')+'.'}
+  if(k==='jan'){const miss=BRIEF.filter(x=>!String((d.brief||{})[x[0]]||'').trim());if(miss.length)return'Write something in every section. Still empty: '+miss.map(x=>x[1].replace(/^\d+\. /,'')).join(', ')+'.';if(!(Number(d.value)>0))return'Put a dollar value on him.'}
   if(k==='apr'){if(!d.farm)return'Choose a farm first.';if(!(Number(d.fee)>=1000))return'Enter a service fee.'}
   if(k==='jun'){if(!d.sp.every(x=>String(x).trim()))return'Write three selling points.';if(!d.targets.every(Boolean)||new Set(d.targets).size<3)return'Choose three different breeder groups.';
     if(E.STATES.reduce((a,s)=>a+(Number(d.geo[s])||0),0)!==100)return'The state shares must total 100%.';if(E.cost(d.buys)>DATA.budget)return'You have spent more than the budget.'}
@@ -579,8 +600,8 @@ function market(d,budgetLeft,pre){
 function resultCard(p,r,rank){
   const dr=E.drivers(r),down=dr.filter(x=>!x.up).slice(0,3),up=dr.filter(x=>x.up).slice(-2);
   return `<div class="grid two">
-   <div class="card blue pop" style="--c:var(--${coltCol(S.assign[p.id])})"><div class="eyebrow">Confirmed bookings</div><div class="row" style="align-items:baseline"><span class="num">${r.bookings}</span><span>of 130</span></div>
-     <div class="bar coral" style="margin:12px 0"><i style="width:${r.bookings/1.3}%"></i></div>
+   <div class="card blue pop" style="--c:var(--${coltCol(S.assign[p.id])})"><div class="eyebrow">Confirmed bookings</div><div class="row" style="align-items:baseline"><span class="num">${r.bookings}</span><span>of ${E.CAP}</span></div>
+     <div class="bar coral" style="margin:12px 0"><i style="width:${r.bookings/E.CAP*100}%"></i></div>
      <div class="grid small"><div><div class="small muted">Places left</div><b>${r.places}</b></div><div><div class="small muted">Fee</div><b>${money(r.fee)}</b></div><div><div class="small muted">Revenue so far</div><b>${money(r.revenue)}</b></div><div><div class="small muted">Leaderboard</div><b>${rank?rank+' of 12':'Hidden'}</b></div></div></div>
    <div class="card"><div class="eyebrow">Your funnel <span class="tag game">Game</span></div>
      ${[['Breeders reached',r.reached],['Enquiries',r.enquiries],['Bookings',r.bookings]].map(([l,v])=>`<div style="margin-top:10px"><div class="row between small"><span>${l}</span><b>${v}</b></div><div class="bar"><i style="width:${Math.min(100,v/Math.max(1,r.reached)*100)}%"></i></div></div>`).join('')}</div>
@@ -609,20 +630,21 @@ function studentView(p){
   if(k==='jan'){
     const d=getDraft(p,'jan');
     body=head('Your owner has retired this colt and asked you to launch him as a stallion in Australia. Research him and the market before you advise where he stands and what he costs.')+
-    `<div class="band blue"><div class="grid two">${coltCard(c)}<div class="card"><div class="eyebrow">Your owner's instructions</div><ul class="plain" style="margin-top:10px"><li>You choose the state and farm, the fee and how he is sold.</li><li>You have ${money(DATA.budget)} for marketing. Anything unspent goes to the farm's sales team.</li><li>A full book is 130 mares.</li><li>You are judged on profit as a share of what this colt could have earned: in his first year, and over his first three years.</li></ul></div></div></div>`+
-    (done?doneCard('Your brief is in. Be ready to give your owner the 60-second version: who he is, who he is up against, and your early advice.')+briefPanel(p,true):
+    `<div class="band blue"><div class="grid two">${coltCard(c)}<div class="card"><div class="eyebrow">Your owner's instructions</div><ul class="plain" style="margin-top:10px"><li>You choose the state and farm, the fee and how he is sold.</li><li>You have ${money(DATA.budget)} for marketing. Anything unspent goes to the farm's sales team.</li><li>A stallion can cover at most ${E.CAP} mares in a season. Real first books average 106 to 115; the best-supported launches reach 150 to 227.</li><li>You are judged on profit as a share of what this colt could have earned: in his first year, and over his first three years.</li></ul></div></div></div>`+
+    marketPanel(true)+(done?doneCard(`Your brief is in. Research: ${levelTag((S.levels[p.id]||{}).research)} Be ready to give your owner the 60-second version: who he is, who he is up against, what he is worth, and your early advice.`)+briefPanel(p,true):
     `<div class="band olive"><div class="stack">
      <div class="card stack writing"><div class="eyebrow">Your brief to the owner</div>
       <p>Before anything is announced, your owner wants a brief: who this horse is, who he is up against, who will buy him, and your early advice. Every section feeds a decision you make later, and you can open your brief on every page from April on. The boxes grow as you write.</p>
       ${BRIEF.map(x=>`<label>${x[1]}<span class="small" style="text-transform:none;letter-spacing:0;font-weight:400">${x[2]} <i>${x[3]}.</i></span><textarea id="jan-${x[0]}" rows="4" data-f="jan.brief.${x[0]}">${esc((d.brief||{})[x[0]]||'')}</textarea></label>`).join('')}
+      <label>Your valuation of him as a stallion ($)<input id="jan-value" type="number" min="0" step="50000" data-f="jan.value" data-num="1" value="${esc(d.value||'')}" style="max-width:280px" placeholder="e.g. 4500000"></label>
       <label>Sources and websites you used<textarea id="jan-src" rows="3" data-f="jan.sources">${esc(d.sources)}</textarea></label>
       ${submitBar('Submit my brief')}</div>
      <details class="card" style="max-width:900px"><summary>Where to look</summary><ul class="plain" style="margin-top:10px">${RESOURCES.map(r=>`<li><b>${r[0]}.</b> ${r[1]}.</li>`).join('')}</ul></details></div></div>`);
   }
   if(k==='apr'){
     const d=getDraft(p,'apr'),fs=DATA.farms.filter(f=>f.state===d.state);
-    body=head('The yearling sales are finishing and breeders are planning matings. Announce where he stands, what he costs and how you will sell him. Then pitch it to the room in 60 seconds.')+briefPanel(p)+
-    (done?doneCard(`${esc(c.name)} will stand at ${esc(p.apr.farm)} for ${money(p.apr.fee)}${p.apr.model==='rights'?`, with ${p.apr.rights} breeding rights offered`:''}. Get your 60-second pitch ready.`):
+    body=head('The yearling sales are finishing and breeders are planning matings. Announce where he stands, what he costs and how you will sell him. Then pitch it to the room in 60 seconds.')+briefPanel(p)+marketPanel()+
+    (done?doneCard(`${esc(c.name)} will stand at ${esc(p.apr.farm)} for ${money(p.apr.fee)}${p.apr.model==='rights'?`, with ${p.apr.rights} breeding rights offered`:''}. Launch case: ${levelTag((S.levels[p.id]||{}).pitch)} Get your 60-second pitch ready.`):
     `<div class="band blue"><div class="stack"><h2>Where will he stand?</h2><div class="row">${E.STATES.map(s=>`<button class="btn ${d.state===s?'':'ghost'}" data-act="state" data-s="${s}">${s}</button>`).join('')}</div>
       ${d.state?`<div class="grid">${fs.map(f=>`<div class="card pick${d.farm===f.name?' on':''}" role="button" tabindex="0" data-act="farm" data-n="${esc(f.name)}"><h3>${esc(f.name)}</h3></div>`).join('')}</div>`:'<p>Pick a state to see its farms.</p>'}
       <p class="small">Only the names are given. Rosters, fees, books and clients are for you to find out.</p></div></div>
@@ -639,7 +661,7 @@ function studentView(p){
   if(k==='jun'){
     const d=getDraft(p,'jun'),tot=E.STATES.reduce((a,s)=>a+(Number(d.geo[s])||0),0),spent=E.cost(d.buys),left=DATA.budget-spent;
     
-    body=head('Stallion parades are weeks away. Decide what you will say about him, who you will say it to, and where the money goes.')+briefPanel(p)+
+    body=head('Stallion parades are weeks away. Decide what you will say about him, who you will say it to, and where the money goes.')+briefPanel(p)+marketPanel()+
     (done?doneCard(`Your positioning is in. Messaging: ${levelTag((S.levels[p.id]||{}).launch)} You spent ${money(E.cost(p.jun.buys))} and held back ${money(DATA.budget-E.cost(p.jun.buys))}.`):
     `<div class="band blue"><div class="grid two"><div class="card stack"><div class="eyebrow">Messaging · judged by your instructor</div>
        ${[0,1,2].map(i=>`<label>Selling point ${i+1}<input id="jun-sp${i}" data-f="jun.sp.${i}" value="${esc(d.sp[i])}"></label>`).join('')}
@@ -680,7 +702,7 @@ function cardFor(p,k){if(!S.assign[p.id]||!(p.apr&&p.apr.farm))return null;const
 function seatCard(p,k){const h=LIVE.full?cardFor(p,k):(RES&&RES.cards&&RES.cards[k]);
   return h||(p.apr&&p.apr.farm?'<div class="card">Your book is being counted on the instructor\'s screen. It will appear here in a moment.</div>':'<div class="card">No launch was submitted for this colt, so there is no book to show.</div>')}
 function finalFor(p){if(!LIVE.full)return RES&&RES.final||null;const r=resultOf(p,'final');if(!r)return null;const c=colt(S.assign[p.id]);
-  return {head:`${esc(c.name)} finished with ${r.bookings} of 130 mares at ${esc(p.apr.farm)}.`,html:report(p,r)}}
+  return {head:`${esc(c.name)} finished with ${r.bookings} of ${E.CAP} mares at ${esc(p.apr.farm)}.`,html:report(p,r)}}
 let lastRes={};
 function writeResults(){if(!LIVE.owner||!LIVE.full||!S)return;
   Object.values(S.players).forEach(p=>{if(p.bot||p.empty)return;
@@ -696,10 +718,11 @@ function report(p,r){
   return `<div class="band blue"><div class="grid">
     <div class="card pop"><div class="eyebrow">First year</div><div class="num" >${pct(r.share1)}</div><p class="small">of this colt's potential profit · ${pos1} of 12</p></div>
     ${S.reveal>=3?`<div class="card pop"><div class="eyebrow">First three years</div><div class="num" >${pct(r.share3)}</div><p class="small">of this colt's potential profit · ${pos3} of 12</p></div>`:''}
+    ${S.reveal>=3?(()=>{const w=E.benchmark(c.id).profit3,v=Number((p.jan||{}).value)||0;return `<div class="card pop"><div class="eyebrow">What he is worth</div><div class="num" style="font-size:clamp(1.7rem,3.2vw,2.4rem);overflow-wrap:anywhere">${money(w)}</div><p class="small">His first three seasons with the best campaign, before his first runners. You valued him at <b>${v?money(v):'nothing'}</b>${v?` (${v>=w?'+':''}${Math.round((v/w-1)*100)}%)`:''}. Your campaign made <b>${money(r.profit3)}</b> of it.</p></div>`})():''}
     <div class="card"><div class="eyebrow">Head to head on ${esc(c.name)}</div><p style="margin-top:8px">${mr?`You ${r.share1>=mr.share1?'beat':'lost to'} ${esc(mate.name)}: ${pct(r.share1)} against ${pct(mr.share1)}.`:'No partner on this colt.'}</p></div></div></div>
    <div class="band olive"><div class="grid two">
     <div class="card"><div class="eyebrow">Year one in numbers</div><div class="scroll"><table><tbody>
-      <tr><td>Confirmed bookings</td><td class="r">${r.bookings} of 130</td></tr><tr><td>Waiting list (does not count)</td><td class="r">${r.waiting}</td></tr>
+      <tr><td>Confirmed bookings</td><td class="r">${r.bookings} of ${E.CAP}</td></tr><tr><td>Waiting list (does not count)</td><td class="r">${r.waiting}</td></tr>
       <tr><td>Final fee</td><td class="r">${money(r.fee)}</td></tr><tr><td>Breeding rights sold</td><td class="r">${r.rightsSold} of ${r.rightsOffered} offered</td></tr>
       <tr><td>Discounts given</td><td class="r">${money(r.discounts)}</td></tr><tr><td>Revenue after discounts</td><td class="r">${money(r.revenue)}</td></tr>
       <tr><td>Marketing and sales support</td><td class="r">${money(DATA.budget)}</td></tr><tr><td><b>Profit</b></td><td class="r"><b>${money(r.profit)}</b></td></tr>
@@ -723,9 +746,9 @@ function report(p,r){
 }
 
 /* ---------- instructor screens ---------- */
-const JT=['jan','jun','sep','oct','nov'],JT_NAME={jan:'Owner briefs (January)',jun:'Messaging (June)',sep:'September event',oct:'October',nov:'November event'};
-const slotOf=j=>j==='jun'?'launch':'ev_'+j;
-function pendingFor(j){if(j==='jan')return[];return Object.values(S.players).filter(p=>!p.bot&&p.submitted[j]&&!(S.levels[p.id]||{})[slotOf(j)])}
+const JT=['jan','apr','jun','sep','oct','nov'],JT_NAME={jan:'Research (January)',apr:'Launch case (April)',jun:'Messaging (June)',sep:'September event',oct:'October',nov:'November event'};
+const slotOf=j=>({jan:'research',apr:'pitch',jun:'launch'})[j]||'ev_'+j;
+function pendingFor(j){return Object.values(S.players).filter(p=>!p.bot&&p.submitted[j]&&!(S.levels[p.id]||{})[slotOf(j)])}
 function judgeList(j,ps){
   const list=ps.filter(p=>p.submitted[j]||(p.bot&&p[j]&&S.stage>=STAGES.findIndex(s=>s.k===j)));
   if(!list.length)return `<div class="card">Nothing to judge yet. ${JT_NAME[j]} answers arrive here when students submit them.</div>`;
@@ -735,9 +758,12 @@ function judgeList(j,ps){
 }
 function judgeCard(j,p,i){
   const lv=S.levels[p.id]||{},slot=slotOf(j);let inner='';
-  if(j==='jan'){const b=(p.jan||{}).brief||{};return `<div class="card" style="background:var(--field)"><div class="row between"><b>${S.hideNames?'Student '+(i+1):esc(p.name)}</b><span class="small muted">${p.bot?'Simulated':''}</span></div>
-     <div class="stack" style="gap:10px;margin-top:10px">${BRIEF.map(x=>`<div><div class="eyebrow">${x[1]}</div><p class="small" style="white-space:pre-wrap;margin-top:2px">${esc(b[x[0]]||'')}</p></div>`).join('')}</div></div>`}
-  if(j==='jun'){const ap=p.apr||{};inner=`<p class="small" style="margin:6px 0">${esc(ap.farm||'No launch submitted')} · ${ap.fee?money(ap.fee):'no fee'} · ${(p.jun.targets||[]).map(esc).join(', ')}</p><p class="small muted">Against: ${(ap.competitors||[]).filter(Boolean).map(esc).join(', ')||'none named'}</p>
+  if(j==='jan'){const jn=p.jan||{},b=jn.brief||{},worth=E.benchmark(S.assign[p.id]).profit3;inner=`<div class="stack" style="gap:10px;margin-top:10px">${BRIEF.map(x=>`<div><div class="eyebrow">${x[1]}</div><p class="small" style="white-space:pre-wrap;margin-top:2px">${esc(b[x[0]]||'')}</p></div>`).join('')}
+     <div class="row between small" style="border-top:2px solid var(--ink);padding-top:8px"><span>Valued at <b>${Number(jn.value)?money(jn.value):'no figure'}</b></span><span>Actually worth <b>${money(worth)}</b>${Number(jn.value)?` · ${jn.value>=worth?'+':''}${Math.round((jn.value/worth-1)*100)}%`:''}</span></div>
+     ${jn.sources?`<p class="small muted">Sources: ${esc(jn.sources)}</p>`:''}</div>`}
+  else if(j==='apr'){const a=p.apr||{};inner=`<p class="small" style="margin:6px 0"><b>${esc(a.farm||'No farm')}</b> · ${a.fee?money(a.fee):'no fee'} · ${a.model==='rights'?a.rights+' breeding rights':'nominations only'}</p><p class="small muted">Against: ${(a.competitors||[]).filter(Boolean).map(esc).join(', ')||'none named'}</p>
+     <p class="small" style="margin-top:8px"><b>Why this farm:</b> ${esc(a.why||'')}</p><p class="small" style="margin-top:6px"><b>Why this fee:</b> ${esc(a.feeWhy||'')}</p>`}
+  else if(j==='jun'){const ap=p.apr||{};inner=`<p class="small" style="margin:6px 0">${esc(ap.farm||'No launch submitted')} · ${ap.fee?money(ap.fee):'no fee'} · ${(p.jun.targets||[]).map(esc).join(', ')}</p><p class="small muted">Against: ${(ap.competitors||[]).filter(Boolean).map(esc).join(', ')||'none named'}</p>
      <ul class="plain" style="margin:10px 0">${p.jun.sp.map(x=>`<li>${esc(x)}</li>`).join('')}</ul><p class="small"><b>Why him:</b> ${esc(p.jun.why)}</p>`}
   else{const x=p[j]||{},ev=E.eventFor(S.seed+p.id,{sep:1,oct:2,nov:3}[j]),nums=[Number(x.cost)?'Spends '+money(x.cost):'',Number(x.disc)?`${x.disc}% off for ${x.mares} mares`:''].filter(Boolean).join(' · ');
     inner=`<p class="small" style="margin:6px 0"><b>Event:</b> ${esc(ev.title)}</p><p style="margin:8px 0">${esc(x.text)}</p>${nums?`<p class="small"><span class="tag game">Numbers</span> ${nums}</p>`:''}
@@ -751,7 +777,7 @@ function hostView(){
   const k=stageKey(),tabs=[['room','Room'],['fees','Fees'],['judge','Judging'],['board','Leaderboard'],['key','Benchmarks'],['setup','Setup']];
   const pend=JT.reduce((a,j)=>a+pendingFor(j).length,0);
   let body=`<div class="band"><div class="stack"><div class="row between"><div><div class="eyebrow">${STAGES[S.stage].m}</div><h1>${STAGES[S.stage].t}</h1></div>
-     <div class="row">${k==='lobby'?`<button class="btn" data-act="draw">Draw the colts</button>`:`<button class="btn ghost" data-act="lock">${S.open?'Lock this stage':'Reopen this stage'}</button>${S.stage<7?`<button class="btn" data-act="next">Move to ${STAGES[S.stage+1].m}</button>`:(S.reveal<3?`<button class="btn" data-act="reveal">${['Reveal the head-to-heads','Reveal the first-year winner','Reveal the three-year winner'][S.reveal]}</button>`:'')}`}</div></div>
+     <div class="row">${k==='lobby'?`<button class="btn" data-act="draw">Draw the colts</button>`:`${S.stage>1?`<button class="btn ghost" data-act="back">Back to ${STAGES[S.stage-1].m}</button>`:''}<button class="btn ghost" data-act="lock">${S.open?'Lock this stage':'Reopen this stage'}</button>${S.stage<7?`<button class="btn" data-act="next">Move to ${STAGES[S.stage+1].m}</button>`:(S.reveal<3?`<button class="btn" data-act="reveal">${['Reveal the head-to-heads','Reveal the first-year winner','Reveal the three-year winner'][S.reveal]}</button>`:'')}`}</div></div>
      <div class="row">${tabs.map(t=>`<button class="btn sm ${ui.tab===t[0]?'blue':'ghost'}" data-act="tab" data-t="${t[0]}">${t[1]}${t[0]==='judge'&&pend?' ('+pend+')':''}</button>`).join('')}</div></div></div>`;
   const ps=Object.values(S.players);
   if(ui.tab==='room'){
@@ -767,7 +793,7 @@ function hostView(){
   if(ui.tab==='judge'){
     const jt=ui.jt||(JT.includes(k)?k:'jun');
     body+=`<div class="band"><div class="stack"><div class="row between"><div class="row">${JT.map(j=>{const n=pendingFor(j).length;return `<button class="btn sm ${jt===j?'':'ghost'}" data-act="jt" data-j="${j}">${JT_NAME[j]}${n?' ('+n+')':''}</button>`}).join('')}</div><button class="btn ghost sm" data-act="names">${S.hideNames?'Show names':'Hide names'}</button></div>
-     <p class="lead">${jt==='jan'?'Read each brief before the 60-second presentations. Briefs are not scored.':jt==='jun'?'Give each set of messaging a level. It scales how well all of that student\'s marketing works: Weak 70%, Solid 90%, Strong 105%, Outstanding 115%.':'Give each response a level. It sets how much of this month\'s swing in mares the student captures: Weak 30%, Solid 60%, Strong 85%, Outstanding 100%. Any money spent or discount offered is taken off their budget and revenue as entered.'+(jt==='oct'?' In October one level covers the event response, the diagnosis and any rewritten messaging.':'')}${jt==='jan'?'':' Anything left unmarked counts as Solid.'}</p>
+     <p class="lead">${jt==='jan'?'Judge each brief as a whole: depth, accuracy, the valuation, and whether the advice follows from the research. Research sets how much of his pre-season demand the launch captures: Weak 85%, Solid 93%, Strong 98%, Outstanding 100%.':jt==='apr'?'Judge the launch case and the 60-second pitch: farm fit, fee reasoning and the competitors named. It sets how well the launch lands with breeders: Weak 88%, Solid 95%, Strong 99%, Outstanding 100%.':jt==='jun'?'Give each set of messaging a level. It scales how well all of that student\'s marketing works: Weak 70%, Solid 90%, Strong 105%, Outstanding 115%.':'Give each response a level. It sets how much of this month\'s swing in mares the student captures: Weak 30%, Solid 60%, Strong 85%, Outstanding 100%. Any money spent or discount offered is taken off their budget and revenue as entered.'+(jt==='oct'?' In October one level covers the event response, the diagnosis and any rewritten messaging.':'')} Anything left unmarked counts as Solid.</p>
      ${judgeList(jt,ps)}</div></div>`;
   }
   if(ui.tab==='board'){
@@ -782,7 +808,7 @@ function hostView(){
       <tr><td>Second farm</td><td>${esc(c.B.farm)}, ${c.B.state} at ${money(c.B.fee)}: up to ${c.B.bookings} mares</td></tr>
       ${c.WA?`<tr><td>WA window</td><td>${esc(c.WA.farm)}, ${money(c.WA.lo)} to ${money(c.WA.hi)}</td></tr>`:''}${c.QLD&&c.QLD.farm!==c.A.farm?`<tr><td>Queensland window</td><td>${esc(c.QLD.farm)}, ${money(c.QLD.lo)} to ${money(c.QLD.hi)}</td></tr>`:''}
       <tr><td>Breeding rights</td><td>30 is best for year one; ${b.rights3} is best over three years</td></tr><tr><td>Breeder groups</td><td>${c.groups.map(esc).join('; ')}</td></tr>
-      <tr><td>Best profit</td><td>${money(b.profit1)} in year one; ${money(b.profit3)} over three years</td></tr></tbody></table></div></div>`}).join('')}</div></div></div>`;
+      <tr><td>Full-campaign first book</td><td>${b.bookings} mares</td></tr><tr><td>Best profit</td><td>${money(b.profit1)} in year one; ${money(b.profit3)} over three years</td></tr><tr><td>What he is worth</td><td>${money(b.profit3)}: his first three seasons with the best campaign</td></tr></tbody></table></div></div>`}).join('')}</div></div></div>`;
   }
   if(ui.tab==='setup'){
     body+=`<div class="band olive"><div class="grid two">
@@ -801,6 +827,7 @@ function revealView(){
   return `<div class="band blue"><div class="stack">
     ${S.reveal>=3&&b3[0]?`<div class="card coral pop" style="text-align:center"><div class="eyebrow">Winner over three years</div><h1 style="margin:8px 0">${esc(b3[0].p.name)}</h1><p>${esc(colt(S.assign[b3[0].p.id]).name)} at ${esc(b3[0].p.apr.farm)} · ${pct(b3[0].r.share3)} of his three-year potential · ${b3[0].r.rightsSold} breeding rights sold</p></div>`:''}
     ${S.reveal>=2&&b1[0]?`<div class="card pop" style="text-align:center"><div class="eyebrow">First-year winner</div><h1 style="margin:8px 0">${esc(b1[0].p.name)}</h1><p>${esc(colt(S.assign[b1[0].p.id]).name)} at ${esc(b1[0].p.apr.farm)} · ${b1[0].r.bookings} mares at ${money(b1[0].r.fee)} · ${pct(b1[0].r.share1)} of his potential</p></div>`:''}
+    ${S.reveal>=3?`<div class="card pop"><div class="eyebrow">What each horse is actually worth</div><p class="small" style="margin:6px 0 10px">His value as a stallion: what his first three seasons earn the owner with the best campaign, before his first runners.</p><div class="scroll"><table><thead><tr><th>Student</th><th>Colt</th><th class="r">Valued at</th><th class="r">Actually worth</th><th class="r">Out by</th><th class="r">Their campaign made</th></tr></thead><tbody>${Object.values(S.players).map(p=>({p,r:resultOf(p,'final')})).filter(x=>x.r).sort((a,b)=>Math.abs(((a.p.jan||{}).value||0)/E.benchmark(S.assign[a.p.id]).profit3-1)-Math.abs(((b.p.jan||{}).value||0)/E.benchmark(S.assign[b.p.id]).profit3-1)).map(x=>{const w=E.benchmark(S.assign[x.p.id]).profit3,v=Number((x.p.jan||{}).value)||0;return `<tr><td>${esc(x.p.name)}</td><td>${esc(colt(S.assign[x.p.id]).name)}</td><td class="r">${v?money(v):'none'}</td><td class="r">${money(w)}</td><td class="r">${v?(v>=w?'+':'')+Math.round((v/w-1)*100)+'%':''}</td><td class="r">${money(x.r.profit3)}</td></tr>`}).join('')}</tbody></table></div></div>`:''}
     <h2>Head to head</h2><div class="grid">${pairs.map(x=>`<div class="card" style="background:var(--${coltCol(x.c.id)}-t)"><h3>${esc(x.c.name)}</h3>${x.pr.map((y,i)=>`<div class="row between" style="padding:6px 0;border-top:2px solid var(--ink)"><span>${i===0?'<b>':''}${esc(y.p.name)}${i===0?'</b> <span class="tag ok">Wins</span>':''}</span><span>${y.r.bookings} mares · ${pct(y.r.share1)}</span></div>`).join('')}</div>`).join('')}</div></div></div>`;
 }
 
@@ -831,9 +858,10 @@ function act(a,t){
   if(a==='tab'){ui.tab=t.dataset.t}
   else if(a==='seat'){claimSeat(t.dataset.p);return}
   else if(a==='pwgo'){const v=($('#pwin')||{}).value||'';if(hash(S.seed+':'+v.trim().toLowerCase())===S.pwHash){lsSet('sg-pw',S.pwHash);LIVE.pw=S.pwHash;ui.err=''}else ui.err='That is not the room password.'}
-  else if(LIVE.owner&&ui.role==='host'&&['draw','next','lock','reveal','names','timer','timer0','sim'].includes(a)){
+  else if(LIVE.owner&&ui.role==='host'&&['draw','next','back','lock','reveal','names','timer','timer0','sim'].includes(a)){
     if(a==='draw'){S.assign=E.assign(DATA.students.map((n,i)=>'p'+i),S.seed);S.stage=1;S.open=true}
     else if(a==='next'){ui.err='';S.stage=Math.min(7,S.stage+1);S.open=true;S.timerEnd=0;ui.edit=false;ui.jt=null}
+    else if(a==='back'){ui.err='';S.stage=Math.max(1,S.stage-1);S.open=true;S.timerEnd=0;S.reveal=0;ui.edit=false;ui.jt=null}
     else if(a==='lock'){S.open=!S.open}
     else if(a==='reveal'){S.reveal=Math.min(3,S.reveal+1);ui.tab='room'}
     else if(a==='names'){S.hideNames=!S.hideNames}
@@ -869,7 +897,9 @@ function act(a,t){
   }
   render();
 }
-document.addEventListener('click',e=>{const t=e.target.closest('[data-act]');if(!t||t.tagName==='SELECT'||t.type==='checkbox'||!t.dataset.act)return;if(t.tagName==='FORM')return;if(t.disabled)return;act(t.dataset.act,t)});
+let downAct=null,downAt=0;
+document.addEventListener('pointerdown',e=>{downAct=e.target.closest&&e.target.closest('[data-act]');downAt=Date.now()},true);
+document.addEventListener('click',e=>{let t=e.target.closest('[data-act]');if(!t&&downAct&&Date.now()-downAt<1000&&document.contains(downAct))t=downAct;if(!t||t.tagName==='SELECT'||t.type==='checkbox'||!t.dataset.act)return;if(t.tagName==='FORM')return;if(t.disabled)return;act(t.dataset.act,t)});
 document.addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&e.target.matches('[role=button][data-act]')){e.preventDefault();act(e.target.dataset.act,e.target)}});
 document.addEventListener('change',e=>{const t=e.target;
   if(t.id==='role'){ui.role=t.value;ui.edit=false;ui.err='';render();return}
