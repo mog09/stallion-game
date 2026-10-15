@@ -114,7 +114,7 @@ details summary{cursor:pointer;font-weight:700}
   var LEVEL_NAMES = { weak: 'Weak', solid: 'Solid', strong: 'Strong', outstanding: 'Outstanding' };
   var EV_Q = { weak: 0.30, solid: 0.60, strong: 0.85, outstanding: 1.0 };
   var CAP = 200, MAX_RIGHTS = 30, RIGHT_MULT = 2.5;
-  var REF = 130, RESEARCH_F = { weak: 0.85, solid: 0.93, strong: 0.98, outstanding: 1 }, PITCH_F = { weak: 0.88, solid: 0.95, strong: 0.99, outstanding: 1 };
+  var H2H_LOSS = 0.02, REF = 130, RESEARCH_F = { weak: 0.85, solid: 0.93, strong: 0.98, outstanding: 1 }, PITCH_F = { weak: 0.88, solid: 0.95, strong: 0.99, outstanding: 1 };
   var W_BASE = 65, W_LAUNCH = 45, W_EVENTS = 12, W_SALES = 8;
   var STATES = ['NSW', 'VIC', 'QLD', 'WA'];
   var GROUPS = ['Large commercial farms', 'Mid-size commercial breeders', 'Farm clients and shareholders',
@@ -252,6 +252,7 @@ details summary{cursor:pointer;font-weight:700}
     var msgF = (0.7 * L + 0.3 * O) / LEVELS.outstanding, msgLaunch = L / LEVELS.outstanding;
     var tf = targetFit(colt, dec.targets), gf = geoFit(colt, pl, dec.geo);
     var BK = benchBook(colt), K = BK / REF;
+    var h2h = 1 - H2H_LOSS * Math.max(0, Math.min(6, Number(levels && levels.h2hLost) || 0));
     var prep = RESEARCH_F[(levels && levels.research) || 'solid'] * PITCH_F[(levels && levels.pitch) || 'solid'];
     var mk = 0.8 + 0.2 * pl.P;
 
@@ -261,7 +262,7 @@ details summary{cursor:pointer;font-weight:700}
     var seed = opts.seed || 'x';
     rounds.forEach(function (r, i) {
       lateBuys = addBuys(lateBuys, r.buys || {});
-      var ev = eventFor(seed, i + 1), answered = !!(r.text && String(r.text).trim()) || r.level;
+      var ev = (opts.events && opts.events[i]) || eventFor(seed, i + 1), answered = !!(r.text && String(r.text).trim()) || r.level;
       var lv = answered ? (r.level || 'solid') : null, q = lv ? EV_Q[lv] : 0.15;
       var c = Math.max(0, Number(r.cost) || 0), dp = clamp(Number(r.disc) || 0, 0, 50) / 100, dm = clamp(Math.round(Number(r.mares) || 0), 0, CAP);
       qs.push(q); eventCost += c; evs.push({ event: ev, level: lv, judged: !!r.level, text: r.text || '', cost: c, disc: dp, mares: dm });
@@ -294,6 +295,7 @@ details summary{cursor:pointer;font-weight:700}
     var finalBook = clamp((octBook + remaining) * (1 + noise), octBook, CAP);
 
     var stage = opts.stage || 'final';
+    sepBook *= h2h; octBook *= h2h; finalBook *= h2h;
     var book = stage === 'sep' ? sepBook : stage === 'oct' ? octBook : finalBook;
     var bookings = Math.round(book);
 
@@ -331,7 +333,7 @@ details summary{cursor:pointer;font-weight:700}
       share1: profit1 / bench.profit1, share3: profit3 / bench.profit3, profit3: Math.round(profit3),
       y2: y2, y3: y3, spent: spent, left: left, reached: reached, enquiries: enquiries,
       factors: { placement: pl.P, placementKind: pl.kind, fee: d1, feeStar: pl.fstar, feeLo: pl.lo, feeHi: pl.hi, message: msgF, targets: tf, geo: gf,
-        mix: mixAll, mixLaunch: mixL, events: stage === 'oct' ? qs[0] : (qs[0] + qs[1] + qs[2]) / 3, sales: Math.min(1, salesCurve(left) / salesCurve(benchLeft)), crowd: pl.crowd || 0, prep: prep },
+        mix: mixAll, mixLaunch: mixL, events: stage === 'oct' ? qs[0] : (qs[0] + qs[1] + qs[2]) / 3, sales: Math.min(1, salesCurve(left) / salesCurve(benchLeft)), crowd: pl.crowd || 0, prep: prep, h2h: h2h },
       parts: { base: base * d1, launch: launch * d1, season: (late + evPart(0) + evPart(1) + evPart(2) + sales) * d1 },
       events: evs
     };
@@ -369,6 +371,7 @@ details summary{cursor:pointer;font-weight:700}
       'The fee is below what the market would pay, so each booking earns less than it could.';
     add(res.fee1 > f.feeStar * 1.03 ? f.fee : (res.fee1 < f.feeStar * 0.97 ? 0.8 : 1), 'The fee sits where breeders see value and the owner still earns.', feeTxt);
     add((f.prep - 0.75) / 0.25, 'Your research and launch case gave the owner and the farm real confidence in him.', 'Thin research or a weak launch case cost him bookings before the season even started.');
+    if (f.h2h < 1) out.push({ score: f.h2h, up: false, text: 'Losing head-to-heads to your partner on this colt cost ' + Math.round((1 - f.h2h) * 100) + '% of the book.' });
     add(f.message, 'The messaging is landing with breeders.', 'The messaging is not giving breeders a strong reason to choose him.');
     add((f.targets - 0.55) / 0.45, 'You are talking to the breeders most likely to use him.', 'Much of the effort is aimed at breeders who are unlikely to use this horse.');
     add((f.geo - 0.5) / 0.5, 'The marketing is concentrated in the right states.', 'Too much of the marketing is going to states where his mares are not.');
@@ -470,9 +473,9 @@ const farm=n=>DATA.farms.find(f=>f.name===n);
 let S=null, ui={role:'host',tab:'room'}, draft={};
 const LIVE={db:null,user:null,owner:false,full:false,err:'',token:null,seat:null,uid:null,booted:false,saveErr:''};
 let GS=null, SUBS={}, SEATS={}, JUDGE={levels:{},password:''}, RES=null, SUB=null;
-const GS_KEYS=['seed','stage','open','pwHash','timerEnd','reveal','hideNames','sim','assign'];
+const GS_KEYS=['seed','stage','open','pwHash','timerEnd','reveal','hideNames','sim','assign','events'];
 const SLOT_STAGE={research:'jan',pitch:'apr',launch:'jun',ev_sep:'sep',ev_oct:'oct',ev_nov:'nov',oct:'oct'};
-function newGame(){return {seed:'g'+Math.floor(Math.random()*1e9),stage:0,open:true,pwHash:'',timerEnd:0,reveal:0,hideNames:false,sim:true,assign:{}}}
+function newGame(){return {seed:'g'+Math.floor(Math.random()*1e9),stage:0,open:true,pwHash:'',timerEnd:0,reveal:0,hideNames:false,sim:true,assign:{},events:{}}}
 function lsGet(k){try{return localStorage.getItem(k)}catch(e){return null}}
 function lsSet(k,v){try{localStorage.setItem(k,v)}catch(e){}}
 function lsDel(k){try{localStorage.removeItem(k)}catch(e){}}
@@ -508,6 +511,7 @@ function rebuild(){
     }});
 }
 function changed(){rebuild();render();if(LIVE.owner)later('res',writeResults,1200)}
+
 const stageKey=()=>STAGES[S.stage].k;
 const P=id=>S.players[id];
 function fillBot(p){
@@ -533,11 +537,23 @@ function decisionsOf(p){
 function evDec(p,k){const x=p[k]||{},l=S.levels[p.id]||{};
   return {text:x.text||'',cost:Number(x.cost)||0,disc:Number(x.disc)||0,mares:Number(x.mares)||0,level:l['ev_'+k]||null,buys:x.buys||{}};
 }
-function levelsOf(p){const l=S.levels[p.id]||{};return{launch:l.launch||'solid',oct:l.oct||l.launch||'solid',research:l.research||'solid',pitch:l.pitch||'solid'}}
+function levelsOf(p){const l=S.levels[p.id]||{};return{h2hLost:Object.keys(l).filter(k=>k.startsWith('h2h_')&&l[k]==='lost').length,launch:l.launch||'solid',oct:l.oct||l.launch||'solid',research:l.research||'solid',pitch:l.pitch||'solid'}}
+const ROUND_OF={sep:1,oct:2,nov:3},MONTH_OF={1:'sep',2:'oct',3:'nov'};
+function evDefault(coltId,round){const pool=E.EVENTS.filter(e=>e.round===round),i=DATA.colts.findIndex(c=>c.id===coltId);if(!pool.length)return E.eventFor(S.seed+coltId,round);return pool[(Math.max(0,i)+Math.floor(mulberry(S.seed+':ev'+round)()*pool.length))%pool.length]}
+function evForColt(coltId,round){const ov=(S.events||{})[coltId+':'+round];
+  if(ov&&ov.custom)return {id:'custom',round,title:ov.title||'A challenge from your instructor',text:ov.text||'',basis:'',options:[]};
+  if(ov&&ov.id){const e=E.EVENTS.find(x=>x.id===ov.id);if(e)return e}
+  return evDefault(coltId,round)}
+function evFor(p,round){return evForColt(S.assign[p.id],round)}
+function lvStore(){return JUDGE.levels}
+function lvSaved(){saveJudge();changed()}
+function evSaved(){S.events=S.events||{};GS.events=S.events;later('ev',saveState,700)}
+function applyEvPick(t){S.events=S.events||{};const k=t.dataset.evk,v=t.value;
+  if(v==='custom')S.events[k]={custom:true,title:'',text:''};else if(!v)delete S.events[k];else S.events[k]={id:v}}
 function resultOf(p,stage){
   if(!S.assign[p.id]||!(p.apr&&p.apr.farm))return null;
   const st=stage||(S.stage>=7?'final':S.stage>=5?'oct':'sep');
-  return E.evaluate(S.assign[p.id],decisionsOf(p),levelsOf(p),{seed:S.seed+p.id,stage:st});
+  return E.evaluate(S.assign[p.id],decisionsOf(p),levelsOf(p),{seed:S.seed+p.id,stage:st,events:[1,2,3].map(r=>evFor(p,r))});
 }
 function board(stage,metric){
   return Object.values(S.players).map(p=>({p,r:resultOf(p,stage)})).filter(x=>x.r).sort((a,b)=>(b.r[metric||'share1']-a.r[metric||'share1'])||(b.r.bookings-a.r.bookings));
@@ -581,12 +597,14 @@ function horse(){return `<div class="gate">${DATA.colts.map((c,i)=>`<div style="
 function geoTag(tot){return tot===100?'<span class="tag ok">Totals 100%</span>':`<span class="tag wait">Totals ${tot}%; it must be 100%</span>`}
 function validate(p,k,d){
   if(k==='jan'){const miss=BRIEF.filter(x=>!String((d.brief||{})[x[0]]||'').trim());if(miss.length)return'Write something in every section. Still empty: '+miss.map(x=>x[1].replace(/^\d+\. /,'')).join(', ')+'.';if(!(Number(d.value)>0))return'Put a dollar value on him.'}
-  if(k==='apr'){if(!d.farm)return'Choose a farm first.';if(!(Number(d.fee)>=1000))return'Enter a service fee.'}
+  if(k==='apr'){if(!d.farm)return'Choose a farm first.';if(!(Number(d.fee)>=1000))return'Enter a service fee of at least $1,000.';if(Number(d.fee)>500000)return'That fee looks too high. Check it is in dollars, e.g. 16500.';if(d.model==='rights'&&!(Number(d.rights)>=1&&Number(d.rights)<=30))return'Offer between 1 and 30 breeding rights, or choose straight nominations only.'}
   if(k==='jun'){if(!d.sp.every(x=>String(x).trim()))return'Write three selling points.';if(!d.targets.every(Boolean)||new Set(d.targets).size<3)return'Choose three different breeder groups.';
-    if(E.STATES.reduce((a,s)=>a+(Number(d.geo[s])||0),0)!==100)return'The state shares must total 100%.';if(E.cost(d.buys)>DATA.budget)return'You have spent more than the budget.'}
-  if(k==='sep'||k==='oct'||k==='nov'){if(String(d.text||'').trim().split(/\s+/).length<8)return'Write your response to the market event: what you will do and why.';
+    if(E.STATES.some(s=>Number(d.geo[s])<0||Number(d.geo[s])>100))return'Each state share must be between 0% and 100%.';if(E.STATES.reduce((a,s)=>a+(Number(d.geo[s])||0),0)!==100)return'The state shares must total 100%.';if(E.cost(d.buys)>DATA.budget)return'You have spent more than the budget.'}
+  if(k==='sep'||k==='oct'||k==='nov'){{const nw=String(d.text||'').trim().split(/\s+/).filter(Boolean).length;if(nw<8)return nw?'Your response to the market event is only '+nw+' word'+(nw>1?'s':'')+'. Write at least 8 words: what you will do and why.':'Write your response to the market event (at least 8 words): what you will do and why.'}
     if(k==='oct'&&!String(d.diagnosis||'').trim())return'Say what is going wrong and what you will change.';
-    const dc=Number(d.disc)||0,dm=Number(d.mares)||0;if(dc<0||dc>50)return'A discount must be between 0% and 50%.';if(dc>0&&!(dm>0))return'Say how many mares the discount covers.';if(dm>130)return'A book is 130 mares at most.';
+    if(k==='oct'&&d.fee!==''&&d.fee!=null&&Number(d.fee)!==0&&!(Number(d.fee)>=1000&&Number(d.fee)<=500000))return'Enter the new fee in dollars (at least $1,000), or leave it blank to keep your fee.';
+    if(Number(d.cost)<0)return'Spend can not be negative.';if(Number(d.mares)<0)return'Mares can not be negative.';
+    const dc=Number(d.disc)||0,dm=Number(d.mares)||0;if(dc<0||dc>50)return'A discount must be between 0% and 50%.';if(dc>0&&!(dm>0))return'Say how many mares the discount covers.';if(dm>E.CAP)return'A book is '+E.CAP+' mares at most.';
     if(spentSoFar(p,k)+E.cost(d.buys)+(Number(d.cost)||0)>DATA.budget)return'That costs more than you have left.'}
   return'';
 }
@@ -609,8 +627,8 @@ function resultCard(p,r,rank){
    <div class="card"><div class="eyebrow">What is holding him back</div><ul class="plain" style="margin-top:10px">${down.length?down.map(x=>`<li>${esc(x.text)}</li>`).join(''):'<li class="up">No weak points showing.</li>'}</ul></div></div>`;
 }
 function eventCard(p,round,d){
-  const ev=E.eventFor(S.seed+p.id,round),k=stageKey();
-  return `<div class="card stack"><div><div class="eyebrow">Market event · judged by your instructor</div><h2 style="margin:8px 0">${esc(ev.title)}</h2><p>${esc(ev.text)}</p><p class="small muted" style="margin-top:6px"><span class="tag real">Real</span> ${esc(ev.basis)}</p></div>
+  const ev=evFor(p,round),k=stageKey();
+  return `<div class="card stack"><div><div class="eyebrow">Market event · judged by your instructor</div><h2 style="margin:8px 0">${esc(ev.title)}</h2><p>${esc(ev.text)}</p><p class="small muted" style="margin-top:6px">${ev.basis?`<span class="tag real">Real</span> ${esc(ev.basis)}`:'<span class="tag game">From your instructor</span>'}</p></div>
    <label>Your response: what will you do, who will you speak to, and why will it protect or grow the book?<textarea id="${k}-text" data-f="${k}.text" rows="6" placeholder="Be specific. Your instructor judges the thinking, not the length.">${esc(d.text)}</textarea></label>
    <p class="small muted">If your answer costs money or gives anything away, put the numbers in below. They come off your budget and your revenue.</p>
    <div class="grid small"><label>Spend from your budget ($)<input id="${k}-cost" type="number" min="0" step="500" data-f="${k}.cost" data-num="1" value="${esc(d.cost)}" placeholder="0"></label>
@@ -734,7 +752,7 @@ function report(p,r){
     <div class="card"><div class="eyebrow">What worked</div><ul class="plain" style="margin-top:10px">${dr.filter(x=>x.up).map(x=>`<li class="up">${esc(x.text)}</li>`).join('')||'<li>Nothing stood out.</li>'}</ul></div>
     <div class="card"><div class="eyebrow">What cost you</div><ul class="plain" style="margin-top:10px">${dr.filter(x=>!x.up).map(x=>`<li>${esc(x.text)}</li>`).join('')||'<li class="up">No weak points.</li>'}</ul></div>
     <div class="card"><div class="eyebrow">Your messaging</div><p style="margin:8px 0">${levelTag(lv.launch||'solid')}${lv.oct?' then '+levelTag(lv.oct)+' in October':''}</p>${lv.note?`<p class="small"><b>Instructor:</b> ${esc(lv.note)}</p>`:''}<ul class="plain small" style="margin-top:8px">${(bd.sp||[]).map(x=>`<li>${esc(x)}</li>`).join('')}</ul></div>
-    <div class="card"><div class="eyebrow">Market events</div><ul class="plain small" style="margin-top:10px">${r.events.map(e=>`<li><b>${esc(e.event.title)}.</b> ${e.level?levelTag(e.judged?e.level:'solid')+(e.judged?'':' (not judged, counted as Solid)'):'<span class="tag wait">No response</span>'}${e.cost?' · spent '+money(e.cost):''}${e.disc?` · ${Math.round(e.disc*100)}% off for ${e.mares} mares`:''}<br>${e.level!=='outstanding'?'A strong answer: '+esc(e.event.options[0].t)+'.':''}</li>`).join('')}</ul></div></div></div>
+    <div class="card"><div class="eyebrow">Market events</div><ul class="plain small" style="margin-top:10px">${r.events.map(e=>`<li><b>${esc(e.event.title)}.</b> ${e.level?levelTag(e.judged?e.level:'solid')+(e.judged?'':' (not judged, counted as Solid)'):'<span class="tag wait">No response</span>'}${e.cost?' · spent '+money(e.cost):''}${e.disc?` · ${Math.round(e.disc*100)}% off for ${e.mares} mares`:''}<br>${e.level!=='outstanding'&&e.event.options&&e.event.options[0]?'A strong answer: '+esc(e.event.options[0].t)+'.':''}</li>`).join('')}</ul></div></div></div>
    <div class="band"><div class="stack"><h2>The benchmark campaign for ${esc(c.name)}</h2><p class="lead">This is the campaign your instructor judged to be the best available. Compare it with yours.</p>
     <div class="card scroll"><table><thead><tr><th></th><th>Benchmark</th><th>You</th></tr></thead><tbody>
      ${you(['Farm',esc(c.A.farm)+', '+c.A.state],esc(p.apr.farm))}${you(['Fee',money(c.A.fee)],money(p.apr.fee)+(r.feeChanged?', then '+money(r.fee2):''))}
@@ -754,8 +772,12 @@ function judgeList(j,ps){
   if(!list.length)return `<div class="card">Nothing to judge yet. ${JT_NAME[j]} answers arrive here when students submit them.</div>`;
   return DATA.colts.map(c=>{const pair=list.filter(p=>S.assign[p.id]===c.id);if(!pair.length)return'';
     return `<div class="card" style="background:var(--${coltCol(c.id)}-t)"><div class="row between"><h3>${esc(c.name)}</h3><details><summary class="small">Fact sheet</summary><ul class="plain small" style="margin-top:6px">${c.facts.map(f=>`<li>${esc(f)}</li>`).join('')}</ul></details></div>
-     <div class="grid two" style="margin-top:12px">${pair.map((p,i)=>judgeCard(j,p,i)).join('')}</div></div>`}).join('');
+     ${h2hBar(j,c,pair)}<div class="grid two" style="margin-top:12px">${pair.map((p,i)=>judgeCard(j,p,i)).join('')}</div></div>`}).join('');
 }
+function h2hBar(j,c,pair){const all=Object.values(S.players).filter(p=>S.assign[p.id]===c.id);if(all.length<2)return'';
+  const [a,b]=all,la=(S.levels[a.id]||{})['h2h_'+j],nm=(p,i)=>S.hideNames?'Student '+(i+1):esc(p.name);
+  const btn=(w,label)=>`<button class="${(w==='a'&&la==='won')||(w==='b'&&la==='lost')||(w==='even'&&la==='even')?'on':''}" data-act="h2h" data-a="${a.id}" data-b="${b.id}" data-j="${j}" data-w="${w}">${label}</button>`;
+  return `<div class="row" style="margin-top:10px;gap:10px"><span class="eyebrow">Head to head this stage</span><div class="lv">${btn('a',nm(a,0))}${btn('even','Even')}${btn('b',nm(b,1))}</div></div>`}
 function judgeCard(j,p,i){
   const lv=S.levels[p.id]||{},slot=slotOf(j);let inner='';
   if(j==='jan'){const jn=p.jan||{},b=jn.brief||{},worth=E.benchmark(S.assign[p.id]).profit3;inner=`<div class="stack" style="gap:10px;margin-top:10px">${BRIEF.map(x=>`<div><div class="eyebrow">${x[1]}</div><p class="small" style="white-space:pre-wrap;margin-top:2px">${esc(b[x[0]]||'')}</p></div>`).join('')}
@@ -765,16 +787,16 @@ function judgeCard(j,p,i){
      <p class="small" style="margin-top:8px"><b>Why this farm:</b> ${esc(a.why||'')}</p><p class="small" style="margin-top:6px"><b>Why this fee:</b> ${esc(a.feeWhy||'')}</p>`}
   else if(j==='jun'){const ap=p.apr||{};inner=`<p class="small" style="margin:6px 0">${esc(ap.farm||'No launch submitted')} · ${ap.fee?money(ap.fee):'no fee'} · ${(p.jun.targets||[]).map(esc).join(', ')}</p><p class="small muted">Against: ${(ap.competitors||[]).filter(Boolean).map(esc).join(', ')||'none named'}</p>
      <ul class="plain" style="margin:10px 0">${p.jun.sp.map(x=>`<li>${esc(x)}</li>`).join('')}</ul><p class="small"><b>Why him:</b> ${esc(p.jun.why)}</p>`}
-  else{const x=p[j]||{},ev=E.eventFor(S.seed+p.id,{sep:1,oct:2,nov:3}[j]),nums=[Number(x.cost)?'Spends '+money(x.cost):'',Number(x.disc)?`${x.disc}% off for ${x.mares} mares`:''].filter(Boolean).join(' · ');
+  else{const x=p[j]||{},ev=evFor(p,ROUND_OF[j]),nums=[Number(x.cost)?'Spends '+money(x.cost):'',Number(x.disc)?`${x.disc}% off for ${x.mares} mares`:''].filter(Boolean).join(' · ');
     inner=`<p class="small" style="margin:6px 0"><b>Event:</b> ${esc(ev.title)}</p><p style="margin:8px 0">${esc(x.text)}</p>${nums?`<p class="small"><span class="tag game">Numbers</span> ${nums}</p>`:''}
      ${j==='oct'?`<p class="small" style="margin-top:8px"><b>Diagnosis:</b> ${esc(x.diagnosis)}</p>${x.fee?`<p class="small"><b>Fee change:</b> ${money((p.apr||{}).fee)} to ${money(x.fee)}</p>`:''}${x.rewrite&&x.sp?`<p class="small" style="margin-top:8px"><b>Rewritten messaging:</b></p><ul class="plain small">${x.sp.map(y=>`<li>${esc(y)}</li>`).join('')}</ul>`:''}`:''}
-     <details style="margin-top:8px"><summary class="small">Judging guide</summary><p class="small" style="margin-top:6px"><b>Strongest approach:</b> ${esc(ev.options[0].t)}.</p><p class="small muted">Weaker: ${ev.options.slice(1).map(o=>esc(o.t)).join('; ')}.</p></details>`}
+     ${ev.options&&ev.options.length?`<details style="margin-top:8px"><summary class="small">Judging guide</summary><p class="small" style="margin-top:6px"><b>Strongest approach:</b> ${esc(ev.options[0].t)}.</p><p class="small muted">Weaker: ${ev.options.slice(1).map(o=>esc(o.t)).join('; ')}.</p></details>`:'<p class="small muted" style="margin-top:8px">Your own challenge: no judging guide.</p>'}`}
   return `<div class="card" style="background:var(--field)"><div class="row between"><b>${S.hideNames?'Student '+(i+1):esc(p.name)}</b><span class="small muted">${p.bot?'Simulated':''}</span></div>${inner}
    <div class="lv" style="margin:12px 0">${Object.keys(E.LEVELS).map(l=>`<button class="${lv[slot]===l?'on':''}" data-act="level" data-p="${p.id}" data-slot="${slot}" data-l="${l}">${E.LEVEL_NAMES[l]}</button>`).join('')}</div>
    ${j==='jun'?`<label class="small">Comment for their report<input id="note-${p.id}" data-note="${p.id}" value="${esc(lv.note||'')}"></label>`:''}</div>`;
 }
 function hostView(){
-  const k=stageKey(),tabs=[['room','Room'],['fees','Fees'],['judge','Judging'],['board','Leaderboard'],['key','Benchmarks'],['setup','Setup']];
+  const k=stageKey(),tabs=[['room','Room'],['fees','Fees'],['judge','Judging'],['board','Leaderboard'],['chal','Challenges'],['key','Benchmarks'],['setup','Setup']];
   const pend=JT.reduce((a,j)=>a+pendingFor(j).length,0);
   let body=`<div class="band"><div class="stack"><div class="row between"><div><div class="eyebrow">${STAGES[S.stage].m}</div><h1>${STAGES[S.stage].t}</h1></div>
      <div class="row">${k==='lobby'?`<button class="btn" data-act="draw">Draw the colts</button>`:`${S.stage>1?`<button class="btn ghost" data-act="back">Back to ${STAGES[S.stage-1].m}</button>`:''}<button class="btn ghost" data-act="lock">${S.open?'Lock this stage':'Reopen this stage'}</button>${S.stage<7?`<button class="btn" data-act="next">Move to ${STAGES[S.stage+1].m}</button>`:(S.reveal<3?`<button class="btn" data-act="reveal">${['Reveal the head-to-heads','Reveal the first-year winner','Reveal the three-year winner'][S.reveal]}</button>`:'')}`}</div></div>
@@ -793,6 +815,7 @@ function hostView(){
   if(ui.tab==='judge'){
     const jt=ui.jt||(JT.includes(k)?k:'jun');
     body+=`<div class="band"><div class="stack"><div class="row between"><div class="row">${JT.map(j=>{const n=pendingFor(j).length;return `<button class="btn sm ${jt===j?'':'ghost'}" data-act="jt" data-j="${j}">${JT_NAME[j]}${n?' ('+n+')':''}</button>`}).join('')}</div><button class="btn ghost sm" data-act="names">${S.hideNames?'Show names':'Hide names'}</button></div>
+     <p class="small">Head to head: pick which of the two students on each colt did better this stage. The one who loses drops 2% of their book (about 3 mares) for each stage lost. Even means no change.</p>
      <p class="lead">${jt==='jan'?'Judge each brief as a whole: depth, accuracy, the valuation, and whether the advice follows from the research. Research sets how much of his pre-season demand the launch captures: Weak 85%, Solid 93%, Strong 98%, Outstanding 100%.':jt==='apr'?'Judge the launch case and the 60-second pitch: farm fit, fee reasoning and the competitors named. It sets how well the launch lands with breeders: Weak 88%, Solid 95%, Strong 99%, Outstanding 100%.':jt==='jun'?'Give each set of messaging a level. It scales how well all of that student\'s marketing works: Weak 70%, Solid 90%, Strong 105%, Outstanding 115%.':'Give each response a level. It sets how much of this month\'s swing in mares the student captures: Weak 30%, Solid 60%, Strong 85%, Outstanding 100%. Any money spent or discount offered is taken off their budget and revenue as entered.'+(jt==='oct'?' In October one level covers the event response, the diagnosis and any rewritten messaging.':'')} Anything left unmarked counts as Solid.</p>
      ${judgeList(jt,ps)}</div></div>`;
   }
@@ -809,6 +832,14 @@ function hostView(){
       ${c.WA?`<tr><td>WA window</td><td>${esc(c.WA.farm)}, ${money(c.WA.lo)} to ${money(c.WA.hi)}</td></tr>`:''}${c.QLD&&c.QLD.farm!==c.A.farm?`<tr><td>Queensland window</td><td>${esc(c.QLD.farm)}, ${money(c.QLD.lo)} to ${money(c.QLD.hi)}</td></tr>`:''}
       <tr><td>Breeding rights</td><td>30 is best for year one; ${b.rights3} is best over three years</td></tr><tr><td>Breeder groups</td><td>${c.groups.map(esc).join('; ')}</td></tr>
       <tr><td>Full-campaign first book</td><td>${b.bookings} mares</td></tr><tr><td>Best profit</td><td>${money(b.profit1)} in year one; ${money(b.profit3)} over three years</td></tr><tr><td>What he is worth</td><td>${money(b.profit3)}: his first three seasons with the best campaign</td></tr></tbody></table></div></div>`}).join('')}</div></div></div>`;
+  }
+  if(ui.tab==='chal'){
+    body+=`<div class="band"><div class="stack"><p class="lead">Both students on a colt always face the same challenge. Each pair has one picked at random; change it or write your own before you open that month. Students only see it when the month opens.</p>
+     ${[1,2,3].map(r=>`<div class="card stack"><h2>${STAGES.find(x=>x.k===MONTH_OF[r]).m}${S.stage>STAGES.findIndex(x=>x.k===MONTH_OF[r])?' <span class="tag">Already open</span>':''}</h2>
+      <div class="grid two">${DATA.colts.map(c=>{const key=c.id+':'+r,ov=(S.events||{})[key],cur=evForColt(c.id,r),def=evDefault(c.id,r);
+        return `<div class="card" style="background:var(--${coltCol(c.id)}-t)"><h3>${esc(c.name)}</h3>
+         <label style="margin-top:8px">Challenge<select data-act="evpick" data-evk="${key}"><option value=""${!ov?' selected':''}>Random: ${esc(def.title)}</option>${E.EVENTS.map(e=>`<option value="${e.id}"${ov&&ov.id===e.id?' selected':''}>${esc(e.title)}</option>`).join('')}<option value="custom"${ov&&ov.custom?' selected':''}>Write your own…</option></select></label>
+         ${ov&&ov.custom?`<label style="margin-top:8px">Headline<input data-evk="${key}" data-evf="title" value="${esc(ov.title||'')}" placeholder="e.g. Your farm's star stallion has been injured"></label><label style="margin-top:8px">What happened<textarea data-evk="${key}" data-evf="text" rows="3">${esc(ov.text||'')}</textarea></label>`:`<p class="small" style="margin-top:8px">${esc(cur.text)}</p>`}</div>`}).join('')}</div></div>`).join('')}</div></div>`;
   }
   if(ui.tab==='setup'){
     body+=`<div class="band olive"><div class="grid two">
@@ -878,6 +909,10 @@ function act(a,t){
   else if(a==='noreset'){ui.confirmReset=false}
   else if(a==='reset'&&LIVE.owner){ui.confirmReset=false;resetGame();return}
   else if(a==='jt'){ui.jt=t.dataset.j}
+  else if(a==='h2h'&&LIVE.owner){const L=lvStore(),A=L[t.dataset.a]||(L[t.dataset.a]={}),B=L[t.dataset.b]||(L[t.dataset.b]={}),k='h2h_'+t.dataset.j,w=t.dataset.w;
+    A[k]=w==='a'?'won':w==='b'?'lost':'even';B[k]=w==='b'?'won':w==='a'?'lost':'even';lvSaved()}
+  else if(a==='evpick'&&LIVE.owner){applyEvPick(t);saveState();changed();return}
+  else if(a==='h2h'||a==='evpick'){return}
   else if(a==='edit'){ui.edit=true}
   else if(me){
     const d=getDraft(me,t.dataset.k||k);
@@ -908,6 +943,7 @@ document.addEventListener('change',e=>{const t=e.target;
 function grow(t){if(t&&t.tagName==='TEXTAREA'){t.style.height='auto';t.style.height=(t.scrollHeight+4)+'px'}}
 function growAll(){document.querySelectorAll('textarea').forEach(grow)}
 document.addEventListener('input',e=>{const t=e.target;grow(t);
+  if(t.dataset.evk&&t.dataset.evf){const o=(S.events||{})[t.dataset.evk];if(o&&o.custom){o[t.dataset.evf]=t.value;evSaved()}return}
   if(t.dataset.note){if(!LIVE.owner)return;(JUDGE.levels[t.dataset.note]||(JUDGE.levels[t.dataset.note]={})).note=t.value;later('judge',saveJudge,700);return}
   if(t.dataset.pw){if(!LIVE.owner)return;JUDGE.password=t.value;S.pwHash=t.value.trim()?hash(S.seed+':'+t.value.trim().toLowerCase()):'';later('pw',()=>{saveJudge();saveState()},700);return}
   if(!t.dataset.f||ui.role==='host'||!P(ui.role))return;
